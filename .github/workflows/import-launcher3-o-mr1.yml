@@ -1,0 +1,73 @@
+name: Preserve Launcher3 o-mr1 upstream
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/import-launcher3-o-mr1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  preserve:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    env:
+      TARGET: android/Launcher3-o-mr1
+      UPSTREAM_REPO: https://github.com/amirzaidi/Launcher3.git
+      UPSTREAM_COMMIT: 5605dd10845b2ed841cadaf3dddcb0205c057c60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Import exact upstream snapshot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/Launcher3 "$TARGET"
+          git init /tmp/Launcher3
+          git -C /tmp/Launcher3 remote add origin "$UPSTREAM_REPO"
+          git -C /tmp/Launcher3 fetch --depth=1 origin "$UPSTREAM_COMMIT"
+          git -C /tmp/Launcher3 checkout --detach FETCH_HEAD
+          test "$(git -C /tmp/Launcher3 rev-parse HEAD)" = "$UPSTREAM_COMMIT"
+          mkdir -p "$TARGET"
+          tar -C /tmp/Launcher3 --exclude=.git -cf - . | tar -C "$TARGET" -xf -
+          cat > "$TARGET/UPSTREAM.md" <<EOF
+          # Launcher3 upstream preservation
+
+          This directory is an unmodified preservation snapshot used as the source baseline for BlazeRental Launcher Edition.
+
+          - Original repository: https://github.com/amirzaidi/Launcher3
+          - Original branch: o-mr1
+          - Exact commit: $UPSTREAM_COMMIT
+          - License: Apache License 2.0
+
+          This snapshot is preserved for attribution and reproducibility. BlazeSystems modifications belong in the separate BlazeRentalLauncher derivative, not here.
+          EOF
+
+      - name: Verify provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "$TARGET/LICENSE"
+          test -f "$TARGET/build.gradle"
+          test -f "$TARGET/src/com/android/launcher3/Launcher.java"
+          grep -Fq "$UPSTREAM_COMMIT" "$TARGET/UPSTREAM.md"
+          grep -Fq "Apache License" "$TARGET/LICENSE"
+
+      - name: Commit preserved upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "BlazingSystems CI"
+          git config user.email "actions@users.noreply.github.com"
+          git add "$TARGET"
+          if git diff --cached --quiet; then
+            echo "Upstream snapshot already preserved."
+            exit 0
+          fi
+          git commit -m "chore: preserve Launcher3 o-mr1 upstream snapshot"
+          git push origin HEAD:main
